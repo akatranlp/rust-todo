@@ -1,3 +1,4 @@
+use actix_web::error::ErrorInternalServerError;
 use actix_web::patch;
 use actix_web::{
     App, HttpResponse, HttpServer, Responder, delete, error::ErrorNotFound, get, post, web,
@@ -144,6 +145,12 @@ async fn echo(req_body: String) -> impl Responder {
     HttpResponse::Ok().body(format!("Echo: {}", req_body))
 }
 
+#[post("/solve")]
+async fn solve() -> Result<impl Responder, actix_web::Error> {
+    let data = routing::solve().map_err(|err| ErrorInternalServerError(err))?;
+    Ok(HttpResponse::Ok().body(data))
+}
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     println!("Listening on port 8000....");
@@ -159,6 +166,7 @@ async fn main() -> std::io::Result<()> {
             .service(get_todo)
             .service(patch_todo)
             .service(delete_todo)
+            .service(solve)
             .service(echo)
     })
     .bind(("127.0.0.1", 8000))?
