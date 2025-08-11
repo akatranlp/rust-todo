@@ -1,0 +1,107 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY}
+      - S3_SECRET_KEY=${S3_SECRET_KEY}
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_HOST=storage
+      - S3_SCHEME=http
+      - S3_PORT=9000
+    healthcheck:
+      test: wget http://127.0.0.1:8000/ -O - &>/dev/null
+      interval: 2s
+      timeout: 10s
+      retries: 5
+
+    depends_on:
+      storage:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.server.rule=Host(`localhost`)"
+      - "traefik.http.routers.server.entrypoints=web"
+
+  storage:
+    image: ${REGISTRY_PREFIX}minio/minio:RELEASE.2025-07-23T15-54-02Z
+    environment:
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY}
+      - MINIO_DEFAULT_BUCKETS=${S3_BUCKET}
+    ports:
+      - "9001:9001"
+    entrypoint: /bin/bash -c
+    command:
+      - |
+        DATA_DIR=$${DATA_DIR:-/data}
+        if [[ -n "$$MINIO_DEFAULT_BUCKETS" ]]; then
+          minio server /data --address "127.0.0.1:9000" &
+          pid=$$!
+
+          trap "kill $$pid" SIGINT SIGTERM ERR
+
+          until curl -sf --max-time 5 http://localhost:9000/minio/health/live; do
+            sleep 1
+          done
+
+          mc alias set local "http://localhost:9000" "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+
+          while IFS="," read -r bucket; do
+            bucket=$${bucket#* }
+            echo "BUCKET: $$bucket"
+            if mc stat local/$$bucket >/dev/null 2>&1; then
+              echo "Bucket existiert"
+            else
+              mc mb local/$$bucket
+            fi
+
+          done <<< "$$MINIO_DEFAULT_BUCKETS"
+
+          kill $$pid
+        fi
+
+        exec minio server /data --console-address ":9001"
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "--max-time", "5", "http://localhost:9000/minio/health/live"]
+      interval: 2s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - minio_data:/data
+      - ./entrypoint.sh:/tmp/entrypoint.sh
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.minio.rule=Host(`minio.localhost`)"
+      - "traefik.http.routers.minio.entrypoints=web"
+      - "traefik.http.routers.minio.service=minio"
+      - "traefik.http.services.minio.loadbalancer.server.port=9001"
+      - "traefik.http.routers.s3.rule=Host(`s3.localhost`)"
+      - "traefik.http.routers.s3.entrypoints=web"
+      - "traefik.http.routers.s3.service=s3"
+      - "traefik.http.services.s3.loadbalancer.server.port=9000"
+
+  reverse-proxy:
+    image: ${REGISTRY_PREFIX}traefik:latest
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entryPoints.web.address=:3000"
+    ports:
+      - "127.0.0.1:3000:3000/tcp"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.traefik.entrypoints=web"
+      - "traefik.http.routers.traefik.service=traefik"
+      - "traefik.http.services.traefik.loadbalancer.server.port=8080"
+
+volumes:
+  minio_data:

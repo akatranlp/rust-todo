@@ -3,7 +3,7 @@ use std::{any, fmt::format, time};
 use anyhow::{Context, bail};
 use valhalla::{Actor, Config, LatLon, proto};
 
-const ANDORRA_CONFIG: &str = "andorra/config.json";
+const ANDORRA_CONFIG: &str = "valhalla-data/valhalla.json";
 const ANDORRA_TEST_LOC_1: LatLon = LatLon(42.50107335756198, 1.510341967860551); // Sant Julia de Loria
 const ANDORRA_TEST_LOC_2: LatLon = LatLon(42.50627089323736, 1.521734167223563); // Andorra la Vella
 
